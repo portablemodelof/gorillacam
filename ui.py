@@ -1,37 +1,45 @@
-import time
 import pygame
 
 from settings import WHITE, GRAY, RED, GREEN, BLACK
+from version import NAME, VERSION, BUILD
 
 
 class UI:
-    def __init__(self, screen, state, recorder, storage):
+    def __init__(self, screen, state, recorder, storage, events, diagnostics=None):
         self.screen = screen
         self.state = state
         self.recorder = recorder
         self.storage = storage
+        self.events = events
+        self.diagnostics = diagnostics
         self.w, self.h = self.screen.get_size()
 
         self.font = pygame.font.SysFont("Inter", 18)
         self.font_small = pygame.font.SysFont("Inter", 14)
-        self.notice_text = None
-        self.notice_until = 0
-
-    def notify(self, text, seconds=2.0):
-        self.notice_text = text
-        self.notice_until = time.time() + seconds
+        self.font_boot = pygame.font.SysFont("Inter", 22)
 
     def text(self, value, x, y, font=None, color=WHITE):
         font = font or self.font
         surface = font.render(str(value), True, color)
         self.screen.blit(surface, (x, y))
 
-    def splash(self):
+    def splash(self, lines=None):
+        lines = lines or []
         self.screen.fill(BLACK)
-        title = self.font.render("GORILLA CAM", True, WHITE)
-        sub = self.font_small.render("INITIALIZING", True, GRAY)
-        self.screen.blit(title, title.get_rect(center=(self.w // 2, self.h // 2 - 20)))
-        self.screen.blit(sub, sub.get_rect(center=(self.w // 2, self.h // 2 + 18)))
+
+        title = self.font_boot.render(NAME, True, WHITE)
+        version = self.font_small.render(f"v{VERSION}  build {BUILD}", True, GRAY)
+
+        self.screen.blit(title, title.get_rect(center=(self.w // 2, 90)))
+        self.screen.blit(version, version.get_rect(center=(self.w // 2, 120)))
+
+        y = 170
+        for line in lines:
+            color = WHITE if line.startswith("✓") else GRAY
+            item = self.font.render(line, True, color)
+            self.screen.blit(item, item.get_rect(center=(self.w // 2, y)))
+            y += 34
+
         pygame.display.flip()
 
     def draw_status(self):
@@ -49,8 +57,8 @@ class UI:
     def draw_controls(self):
         self.text("GC", 20, 52, self.font_small, GRAY)
 
-        self.text("RES", 20, 82, self.font_small, GRAY)
-        self.text(self.state["resolution"], 20, 102)
+        self.text("MODE", 20, 82, self.font_small, GRAY)
+        self.text(self.state["mode"], 20, 102)
 
         self.text("FPS", 20, 132, self.font_small, GRAY)
         self.text(f'{self.state["fps"]}', 20, 152)
@@ -65,10 +73,17 @@ class UI:
         self.text(self.state["wb"], 20, 302)
 
         self.text("MEDIA", 20, self.h - 58, self.font_small, GRAY)
-        self.text(f"{self.storage.label()}  {self.storage.free_gb():.1f}GB", 20, self.h - 38, self.font_small, WHITE)
+        self.text(
+            f"{self.storage.label()}  {self.storage.free_gb():.1f}GB",
+            20,
+            self.h - 38,
+            self.font_small,
+            WHITE,
+        )
 
     def picker_position(self, key):
         positions = {
+            "mode": (120, 92),
             "fps": (120, 142),
             "shutter": (120, 192),
             "gain": (120, 242),
@@ -82,7 +97,7 @@ class UI:
 
         current = self.state[picker_key]
         box_x, box_y = self.picker_position(picker_key)
-        box_w = 140
+        box_w = 160
         row_h = 30
         box_h = 40 + len(options) * row_h
 
@@ -100,16 +115,60 @@ class UI:
             self.text(f"{mark} {option}", box_x + 14, y, self.font, color)
 
     def draw_notice(self):
-        if self.notice_text and time.time() < self.notice_until:
-            surf = self.font.render(self.notice_text, True, WHITE)
-            pad = 16
-            rect = surf.get_rect(center=(self.w // 2, self.h - 70))
-            bg = pygame.Surface((rect.width + pad * 2, rect.height + pad), pygame.SRCALPHA)
-            bg.fill((0, 0, 0, 180))
-            self.screen.blit(bg, (rect.x - pad, rect.y - pad // 2))
-            self.screen.blit(surf, rect)
+        message = self.events.current()
+        if not message:
+            return
+
+        surface = self.font.render(message, True, WHITE)
+        pad_x = 18
+        pad_y = 10
+        rect = surface.get_rect(center=(self.w // 2, self.h - 70))
+
+        bg = pygame.Surface((rect.width + pad_x * 2, rect.height + pad_y * 2), pygame.SRCALPHA)
+        bg.fill((0, 0, 0, 190))
+
+        self.screen.blit(bg, (rect.x - pad_x, rect.y - pad_y))
+        self.screen.blit(surface, rect)
+
+    def draw_diagnostics(self):
+        if not self.diagnostics:
+            return
+
+        panel = pygame.Surface((self.w, self.h), pygame.SRCALPHA)
+        panel.fill((0, 0, 0, 220))
+        self.screen.blit(panel, (0, 0))
+
+        self.text("DIAGNOSTICS", 30, 28, self.font, WHITE)
+
+        y = 68
+
+        for title, lines in self.diagnostics.sections():
+            self.text(title, 30, y, self.font_small, GRAY)
+            y += 22
+
+            for line in lines:
+                color = WHITE
+
+                if line.startswith("CPU"):
+                    try:
+                        temp = float(line.replace("CPU", "").replace("°C", "").strip())
+                        if temp >= 75:
+                            color = RED
+                    except Exception:
+                        pass
+
+                self.text(line, 48, y, self.font_small, color)
+                y += 22
+
+            y += 14
+
+        self.text("Tap anywhere to close", 30, self.h - 34, self.font_small, GRAY)
 
     def draw(self, ui_mode, picker_key, picker_options):
+        if ui_mode == "DIAGNOSTICS":
+            self.draw_diagnostics()
+            return
+
         self.draw_status()
 
         if ui_mode in ("CONTROL", "PICKER") or self.state["recording"]:
@@ -120,4 +179,3 @@ class UI:
 
         self.draw_notice()
         self.text("Q", 8, self.h - 22, self.font_small, GRAY)
-

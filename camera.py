@@ -1,22 +1,30 @@
 from picamera2 import Picamera2
-from picamera2.encoders import H264Encoder
-from picamera2.outputs import FfmpegOutput
 
-from settings import SHUTTER_US, WB_GAINS
+from settings import SHUTTER_US, WB_GAINS, MODE_CONFIGS
 
 
 class Camera:
     def __init__(self, state):
         self.state = state
         self.picam2 = Picamera2()
+        self.configure()
+
+    def configure(self):
+        mode = MODE_CONFIGS[self.state["mode"]]
 
         config = self.picam2.create_video_configuration(
-            main={"size": (1280, 720), "format": "RGB888"}
+            main={
+                "size": (mode["width"], mode["height"]),
+                "format": "RGB888",
+            }
         )
         self.picam2.configure(config)
 
-        self.encoder = None
-        self.output = None
+    def restart_with_new_mode(self):
+        self.picam2.stop()
+        self.configure()
+        self.picam2.start()
+        self.apply_controls()
 
     def start(self):
         self.picam2.start()
@@ -45,11 +53,3 @@ class Camera:
             controls["ColourGains"] = WB_GAINS[self.state["wb"]]
 
         self.picam2.set_controls(controls)
-
-    def start_recording(self, filepath):
-        self.encoder = H264Encoder(bitrate=25_000_000)
-        self.output = FfmpegOutput(str(filepath))
-        self.picam2.start_recording(self.encoder, self.output)
-
-    def stop_recording(self):
-        self.picam2.stop_recording()

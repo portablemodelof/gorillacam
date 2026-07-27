@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+
+recordings/
+logs/
+
+*.mp4
+*.h264
+*.jpg
+*.png~
+
+.DS_Store

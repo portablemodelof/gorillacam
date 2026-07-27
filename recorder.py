@@ -2,15 +2,17 @@ import os
 import signal
 import subprocess
 import time
-
+from settings import MODE_CONFIGS
 
 class Recorder:
-    def __init__(self, state, camera, storage):
+    def __init__(self, state, camera, storage, events):
         self.state = state
         self.camera = camera
         self.storage = storage
+        self.events = events
         self.start_time = None
         self.process = None
+        self.current_file = None
 
     def toggle(self):
         if self.state["recording"]:
@@ -23,12 +25,13 @@ class Recorder:
             return
 
         filepath = self.storage.new_recording_path()
+        self.current_file = filepath
 
         cmd = [
             "rpicam-vid",
             "-t", "0",
-            "--width", "1920",
-            "--height", "1080",
+            "--width", str(MODE_CONFIGS[self.state["mode"]]["width"]),
+            "--height", str(MODE_CONFIGS[self.state["mode"]]["height"]),
             "--framerate", str(self.state["fps"]),
             "--codec", "libav",
             "--libav-format", "mp4",
@@ -40,6 +43,7 @@ class Recorder:
         self.process = subprocess.Popen(cmd, preexec_fn=os.setsid)
         self.state["recording"] = True
         self.start_time = time.time()
+        self.events.post("Recording Started")
 
     def stop(self):
         if not self.state["recording"]:
@@ -54,9 +58,14 @@ class Recorder:
         except Exception:
             pass
 
+        saved_name = self.current_file.name if self.current_file else "Clip Saved"
+
         self.process = None
         self.state["recording"] = False
         self.start_time = None
+        self.current_file = None
+
+        self.events.post(f"Saved {saved_name}", seconds=2.5)
 
     def timer(self):
         if not self.start_time:

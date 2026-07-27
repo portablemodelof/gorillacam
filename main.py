@@ -3,13 +3,16 @@
 import time
 import pygame
 
-from settings import DEFAULT_STATE
+from settings import load_state
 from camera import Camera
 from storage import Storage
 from recorder import Recorder
 from ui import UI
 from controls import Controls
-
+from events import Events
+from logger import Logger
+from boot import BootManager
+from diagnostics import Diagnostics
 
 def main():
     pygame.init()
@@ -18,20 +21,48 @@ def main():
     screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
     w, h = screen.get_size()
 
-    state = DEFAULT_STATE.copy()
+    logger = Logger()
+    events = Events(logger)
+    boot = BootManager(events)
+
+    boot_lines = []
+
+    def boot_step(label, func):
+        boot_lines.append(f"{label}...")
+        placeholder_state = {"recording": False, "streaming": False}
+        placeholder_recorder = type("RecorderPlaceholder", (), {"timer": lambda self: "00:00:00"})()
+        placeholder_storage = type(
+            "StoragePlaceholder",
+            (),
+            {"label": lambda self: "-", "free_gb": lambda self: 0.0},
+        )()
+        temp_ui = UI(screen, placeholder_state, placeholder_recorder, placeholder_storage, events)
+        temp_ui.splash(boot_lines)
+
+        result = boot.step(label, func)
+
+        boot_lines[-1] = f"✓ {label}"
+        temp_ui.splash(boot_lines)
+        time.sleep(0.25)
+        return result
+
+    state = boot_step("Loading Settings", load_state)
 
     camera = Camera(state)
     storage = Storage()
-    recorder = Recorder(state, camera, storage)
-    ui = UI(screen, state, recorder, storage)
-    controls = Controls(state, camera, recorder, (w, h))
+    diagnostics = Diagnostics(state, storage)
+    recorder = Recorder(state, camera, storage, events)
+    ui = UI(screen, state, recorder, storage, events, diagnostics)
+    controls = Controls(state, camera, recorder, (w, h), events)
+
+    boot_step("Detecting Storage", storage.active_dir)
+    boot_step("Starting Camera", camera.start)
+
+    boot_lines.append("Ready")
+    ui.splash(boot_lines)
+    time.sleep(0.6)
 
     running = True
-
-    ui.splash()
-    time.sleep(1.2)
-
-    camera.start()
 
     while running:
         for event in pygame.event.get():
@@ -57,6 +88,8 @@ def main():
 
         ui.draw(controls.ui_mode, controls.picker_key, picker_options)
         pygame.display.flip()
+
+    events.post("Shutting Down")
 
     if state["recording"]:
         recorder.stop()
